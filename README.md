@@ -10,6 +10,10 @@
 
 代码中的 LLM 调用默认以 Gemini / DeepSeek 为示例；实际使用时可以替换为任何用户自己拥有 API 访问权限的 LLM 服务。
 
+## 使用边界
+
+`01_weibo_browser_crawl.py` 只应用于抓取和分析你本人账号的微博文本，或你已经获得明确授权的数据。请不要用本项目抓取、分析或公开展示他人账号内容。
+
 ## 效果展示
 
 以下示例为聚合可视化图表，不包含原始微博文本、账号信息或具体私人叙述。
@@ -51,16 +55,35 @@ Sentiment: IDEA-CCNL/Erlangshen-Roberta-110M-Sentiment
 Embedding: BAAI/bge-small-zh-v1.5
 ```
 
-## 依赖
+## 环境与依赖
+
+建议使用 Conda 创建独立环境。推荐 Python 3.11；如本机包兼容性需要，也可以使用 Python 3.10。
 
 ```powershell
-pip install pandas plotly scikit-learn joblib tqdm transformers torch sentence-transformers
+conda create -n semantic-emotion python=3.11
+conda activate semantic-emotion
 ```
 
-浏览器抓取需要：
+Package 需求清单：
+
+```text
+pandas
+plotly
+scikit-learn
+joblib
+tqdm
+transformers
+torch
+sentence-transformers
+playwright
+matplotlib
+seaborn
+```
+
+安装命令：
 
 ```powershell
-pip install playwright
+pip install pandas plotly scikit-learn joblib tqdm transformers torch sentence-transformers playwright matplotlib seaborn
 python -m playwright install chromium
 ```
 
@@ -218,6 +241,32 @@ output/visualizations/weibo/
 ```
 
 包括事件密度、情感趋势、成长证据趋势、心路动作分布、证据类型分布、主题/技能热力图和语义空间图。
+
+### 07 生成 TeX/PDF 报告
+
+```powershell
+python D:\Users\18905\Desktop\资料整理\0.自我复盘系统\scripts\07_generate_tex_report.py
+```
+
+`07_generate_tex_report.py` 会生成 TeX 报告和配套图片：
+
+```text
+output/reports/weibo_growth/weibo_growth_report.tex
+output/reports/weibo_growth/figures/
+```
+
+如果需要渲染 PDF，本机需要安装 TeX Live，并确保 `xelatex.exe` 可以在命令行中调用：
+
+```powershell
+xelatex -interaction=nonstopmode -output-directory D:\Users\18905\Desktop\资料整理\0.自我复盘系统\output\reports\weibo_growth D:\Users\18905\Desktop\资料整理\0.自我复盘系统\output\reports\weibo_growth\weibo_growth_report.tex
+```
+
+如果没有安装 TeX Live / `xelatex.exe`，可以不渲染 PDF，直接使用前面步骤生成的 Markdown 输出：
+
+```text
+output/weibo/evidence/evidence_pack.md
+output/weibo/gemini/reranked_evidence_interpretation.md
+```
 
 ## 方法边界
 
