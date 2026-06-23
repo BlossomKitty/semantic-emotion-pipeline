@@ -47,6 +47,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CLEAN_JSONL = PROJECT_ROOT / "data" / "processed" / "weibo" / "3666468881_browser_original_clean.jsonl"
 DEFAULT_LABELS_DIR = PROJECT_ROOT / "output" / "weibo" / "labels" / "label_batches"
 DEFAULT_PREDICTIONS = PROJECT_ROOT / "output" / "weibo" / "evidence" / "model_predictions.jsonl"
+DEFAULT_EVIDENCE_CANDIDATES = PROJECT_ROOT / "output" / "weibo" / "evidence" / "evidence_candidates.jsonl"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output" / "visualizations" / "weibo"
 DEFAULT_SENTIMENT_MODEL = "IDEA-CCNL/Erlangshen-Roberta-110M-Sentiment"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
@@ -144,16 +145,22 @@ def load_prediction_rows(path: Path) -> dict[str, dict[str, Any]]:
     return {str(row.get("id") or ""): row for row in read_jsonl(path) if row.get("id")}
 
 
+def load_evidence_candidate_rows(path: Path) -> dict[str, dict[str, Any]]:
+    return {str(row.get("id") or ""): row for row in read_jsonl(path) if row.get("id")}
+
+
 def merge_rows(
     clean_rows: list[dict[str, Any]],
     labels_by_id: dict[str, dict[str, Any]],
     predictions_by_id: dict[str, dict[str, Any]],
+    evidence_by_id: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     merged = []
     for row in clean_rows:
         item = dict(row)
         label = labels_by_id.get(row["id"], {})
         prediction = predictions_by_id.get(row["id"], {})
+        evidence = evidence_by_id.get(row["id"], {})
         item.update(
             {
                 "keep_score": label.get("keep_score"),
@@ -164,6 +171,8 @@ def merge_rows(
                 "label_model": label.get("label_model") or "",
                 "pred_keep_probability": prediction.get("pred_keep_probability"),
                 "keep_by_length": prediction.get("keep_by_length"),
+                "final_keep": evidence.get("final_keep"),
+                "is_evidence_candidate": row["id"] in evidence_by_id,
             }
         )
         merged.append(item)
@@ -270,6 +279,8 @@ def as_dataframe(rows: list[dict[str, Any]]):
     df["positive_score"] = pd.to_numeric(df["positive_score"], errors="coerce")
     df["keep_score"] = pd.to_numeric(df["keep_score"], errors="coerce")
     df["pred_keep_probability"] = pd.to_numeric(df["pred_keep_probability"], errors="coerce")
+    df["is_evidence_candidate"] = df["is_evidence_candidate"].fillna(False).astype(bool)
+    df["final_keep"] = df["final_keep"].fillna(False).astype(bool)
     return df
 
 
@@ -364,23 +375,32 @@ def build_action_and_type_charts(df, output_dir: Path) -> None:
     import pandas as pd
     import plotly.express as px
 
-    labeled = df[df["inner_action"].fillna("") != ""]
-    if not labeled.empty:
-        action_month = labeled.groupby(["month", "inner_action"]).size().reset_index(name="count")
-        fig = px.bar(action_month, x="month", y="count", color="inner_action", title="心路动作分布（来自 Gemini 伪标签）")
+    evidence_df = df[df["is_evidence_candidate"] & df["final_keep"]].copy()
+    evidence_df = evidence_df[evidence_df["inner_action"].fillna("").ne("")]
+    evidence_df = evidence_df[evidence_df["inner_action"].fillna("").ne("低信号")]
+
+    if not evidence_df.empty:
+        action_month = evidence_df.groupby(["month", "inner_action"]).size().reset_index(name="count")
+        fig = px.bar(action_month, x="month", y="count", color="inner_action", title="心路动作分布（最终保留证据）")
         write_plot(fig, output_dir / "04_inner_action_distribution.html")
         action_month.to_csv(output_dir / "inner_action_monthly.csv", index=False, encoding="utf-8-sig")
+    else:
+        log("No final kept evidence rows for inner action chart.")
 
     type_rows = []
-    for row in df.to_dict("records"):
+    for row in evidence_df.to_dict("records"):
         for evidence_type in row.get("evidence_type") or []:
+            if evidence_type == "低信号":
+                continue
             type_rows.append({"month": row.get("month"), "evidence_type": evidence_type})
     if type_rows:
         type_df = pd.DataFrame(type_rows)
         type_month = type_df.groupby(["month", "evidence_type"]).size().reset_index(name="count")
-        fig = px.bar(type_month, x="month", y="count", color="evidence_type", title="成长证据类型分布（来自 Gemini 伪标签）")
+        fig = px.bar(type_month, x="month", y="count", color="evidence_type", title="成长证据类型分布（最终保留证据）")
         write_plot(fig, output_dir / "05_evidence_type_distribution.html")
         type_month.to_csv(output_dir / "evidence_type_monthly.csv", index=False, encoding="utf-8-sig")
+    else:
+        log("No final kept evidence rows for evidence type chart.")
 
 
 def build_topic_skill_chart(df, output_dir: Path, args: argparse.Namespace) -> None:
@@ -458,12 +478,21 @@ def build_semantic_map(df, output_dir: Path, args: argparse.Namespace) -> None:
     )
 
 
-def build_overview_markdown(output_dir: Path, rows: list[dict[str, Any]], labels_by_id: dict[str, Any], sentiment_count: int) -> None:
+def build_overview_markdown(
+    output_dir: Path,
+    rows: list[dict[str, Any]],
+    labels_by_id: dict[str, Any],
+    evidence_by_id: dict[str, Any],
+    sentiment_count: int,
+) -> None:
+    final_kept_count = sum(bool(row.get("final_keep")) for row in evidence_by_id.values())
     lines = [
         "# Weibo Growth Archive Visualization",
         "",
         f"- 清洗微博数量：{len(rows)}",
         f"- 已有 Gemini/DeepSeek 伪标签数量：{len(labels_by_id)}",
+        f"- 最终证据候选数量：{len(evidence_by_id)}",
+        f"- 最终保留证据数量：{final_kept_count}",
         f"- 已有情感分数数量：{sentiment_count}",
         "",
         "## 输出图表",
@@ -471,15 +500,15 @@ def build_overview_markdown(output_dir: Path, rows: list[dict[str, Any]], labels
         "- `01_event_density.html`：事件密度与成长证据密度",
         "- `02_sentiment_timeline.html`：情感趋势",
         "- `03_keep_score_timeline.html`：成长证据保留趋势",
-        "- `04_inner_action_distribution.html`：心路动作分布",
-        "- `05_evidence_type_distribution.html`：成长证据类型分布",
+        "- `04_inner_action_distribution.html`：心路动作分布（最终保留证据）",
+        "- `05_evidence_type_distribution.html`：成长证据类型分布（最终保留证据）",
         "- `06_topic_skill_heatmap.html`：主题/技能线索热力图",
         "- `07_semantic_map.html`：语义空间地图",
         "",
         "## 方法边界",
         "",
         "- 情感趋势来自中文 RoBERTa 情感模型，只能作为情感极性信号，不等同于心理状态。",
-        "- 心路动作和证据类型来自 LLM 伪标签，不由本地 BERT 预测。",
+        "- 心路动作和证据类型来自 LLM 伪标签，图表只统计 04 最终保留证据，并排除低信号。",
         "- 主题/技能线索来自 TF-IDF + NMF 的无监督发现，需要人工命名和校准。",
     ]
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -492,6 +521,7 @@ def run(args: argparse.Namespace) -> None:
     clean_path = Path(args.input).resolve()
     label_dir = Path(args.labels_dir).resolve()
     prediction_path = Path(args.predictions).resolve()
+    evidence_path = Path(args.evidence_candidates).resolve()
 
     log(f"Loading cleaned records: {clean_path}")
     clean_rows = load_clean_rows(clean_path)
@@ -499,9 +529,10 @@ def run(args: argparse.Namespace) -> None:
 
     labels_by_id = load_label_rows(label_dir)
     predictions_by_id = load_prediction_rows(prediction_path)
-    log(f"Label rows={len(labels_by_id)}; prediction rows={len(predictions_by_id)}")
+    evidence_by_id = load_evidence_candidate_rows(evidence_path)
+    log(f"Label rows={len(labels_by_id)}; prediction rows={len(predictions_by_id)}; evidence candidates={len(evidence_by_id)}")
 
-    rows = merge_rows(clean_rows, labels_by_id, predictions_by_id)
+    rows = merge_rows(clean_rows, labels_by_id, predictions_by_id, evidence_by_id)
     sentiment_cache = output_dir / "sentiment_scores.jsonl"
     sentiment_by_id = load_or_run_sentiment(rows, sentiment_cache, args)
     rows = add_sentiment(rows, sentiment_by_id)
@@ -516,7 +547,7 @@ def run(args: argparse.Namespace) -> None:
     build_action_and_type_charts(df, output_dir)
     build_topic_skill_chart(df, output_dir, args)
     build_semantic_map(df, output_dir, args)
-    build_overview_markdown(output_dir, rows, labels_by_id, len(sentiment_by_id))
+    build_overview_markdown(output_dir, rows, labels_by_id, evidence_by_id, len(sentiment_by_id))
     log(f"Visualization output: {output_dir}")
 
 
@@ -525,6 +556,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", default=str(DEFAULT_CLEAN_JSONL))
     parser.add_argument("--labels-dir", default=str(DEFAULT_LABELS_DIR))
     parser.add_argument("--predictions", default=str(DEFAULT_PREDICTIONS))
+    parser.add_argument("--evidence-candidates", default=str(DEFAULT_EVIDENCE_CANDIDATES))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--sentiment-model", default=DEFAULT_SENTIMENT_MODEL)
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
