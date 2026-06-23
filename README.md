@@ -56,6 +56,27 @@ python -m playwright install chromium
 
 ### 01 抓取与清洗微博
 
+`01_weibo_browser_crawl.py` 运行前不需要 API key，也不需要 `.env`。
+
+需要的是：
+
+1. Python 依赖
+
+```powershell
+pip install playwright
+python -m playwright install chromium
+```
+
+2. 微博登录态
+
+脚本会打开真实浏览器：
+
+```text
+.browser_profiles/weibo
+```
+
+第一次运行时，如果微博要求登录或验证，你在弹出的浏览器里手动登录，然后回到终端按 Enter。之后它会复用这个本地浏览器 profile。
+
 ```powershell
 python D:\Users\18905\Desktop\资料整理\0.自我复盘系统\scripts\01_weibo_browser_crawl.py --delay-ms 20000
 ```
