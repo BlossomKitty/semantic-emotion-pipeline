@@ -141,24 +141,6 @@ output/weibo/labels/pseudo_labels_train.jsonl
 output/weibo/labels/gemini_first_pass_labels.md
 ```
 
-### 02b 局部校对伪标签
-
-```powershell
-python D:\Users\18905\Desktop\资料整理\0.自我复盘系统\scripts\02b_calibrate_pseudo_labels.py
-```
-
-它只校对已标注结果中低分、低信号、长文本样本。文学评论、历史叙事、作品解读、审美偏好、社会观察和创作方法反思，不会因为没有直接出现“我”而自动判为低信号。
-
-会直接覆盖：
-
-```text
-output/weibo/labels/label_batches/*.jsonl
-output/weibo/labels/gemini_first_pass_labels.jsonl
-output/weibo/labels/pseudo_labels_train.jsonl
-output/weibo/labels/gemini_first_pass_labels.md
-output/weibo/labels/gemini_first_pass_labels.txt
-```
-
 ### 03 训练本地 keep 模型并处理低置信样本
 
 ```powershell
@@ -168,7 +150,7 @@ python D:\Users\18905\Desktop\资料整理\0.自我复盘系统\scripts\03_train
 职责：
 
 ```text
-1. 用 02/02b 的伪标签训练本地 keep 模型
+1. 用 02 的伪标签训练本地 keep 模型
 2. 验证 precision / recall / f1
 3. 对 confidence < 0.9 的样本调用 LLM rerank
 4. 高置信样本使用 BERT/BGE 结果
